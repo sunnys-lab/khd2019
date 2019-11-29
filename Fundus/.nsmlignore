@@ -1,0 +1,10 @@
+__pycache__
+.git
+*.pkl
+*.md
+*.txt
+*.pdf
+local_main.py
+venv/
+nsml.exe
+nsml-local/

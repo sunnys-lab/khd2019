@@ -40,27 +40,27 @@ def get_callback(ckpoint_model_name, patient):
     ES = EarlyStopping(
         monitor='val_loss',  # val_f1_m or val_loss
         patience=patient,
-        mode='auto',
+        mode='min',
         verbose=1)
     RR = ReduceLROnPlateau(
-        monitor = 'val_loss', # val_f1_m or val_loss
-        factor = 0.1,
-        patience = patient / 3,
+        monitor='val_loss', # val_f1_m or val_loss
+        factor=0.1,
+        patience=patient / 3,
         min_lr=1e-20,
         verbose=1,
-        mode='auto')
+        mode='min')
     MC = ModelCheckpoint(
-        filepath=ckpoint_model_name,
+        #filepath=ckpoint_model_name,
         monitor='val_loss', # val_f1_m or val_loss
         verbose=1,
         save_best_only=True,
-        mode='auto')  # loss -> min or acc --> max
+        mode='min')  # loss -> min or acc --> max
     #LG = CSVLogger(
     #    './logs/' + BASE_MODEL_STR + '_Native_' + datetime.now().strftime("%m%d%H%M%S") + '_log.csv',
     #    append=True,
     #    separator=',')
 
-    return [ES, RR, MC]
+    return [ES, RR]
 
 
 def bind_model(model):
@@ -116,6 +116,7 @@ if __name__ == '__main__':
 
     # 상위 코드는 베이스라인 코드
     # hyper parameter 변경
+    patience = 9
     nb_epoch = 100
     batch_size = 16
     nb_classes = num_classes
@@ -205,15 +206,6 @@ if __name__ == '__main__':
         monitor = 'val_loss'
         reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=3)
 
-        """ CheckPoint"""
-        checkpoint = ModelCheckpoint(
-            #filepath=ckpoint_model_name,
-            monitor='val_loss',  # val_f1_m or val_loss
-            verbose=1,
-            save_best_only=True,
-            mode='auto')  # loss -> min or acc --> max
-
-
 
         """ Training loop """
         STEP_SIZE_TRAIN = len(X) // batch_size
@@ -234,12 +226,15 @@ if __name__ == '__main__':
             print('epoch = {} / {}'.format(epoch+1, nb_epoch))
             print('check point = {}'.format(epoch))
 
+            ckpoint_file_name = 'Nasnet_epoch_{epoch}' + '_acc_{val_acc:.4f}_loss_{val_loss:.4f}_' + '.hdf5'
+
             # for no augmentation case
             hist = model.fit(X_train, Y_train,
                              validation_data=(X_val, Y_val),
                              batch_size=batch_size,
                              #initial_epoch=epoch,
-                             callbacks=[reduce_lr],
+                             #callbacks=[reduce_lr],
+                             callbacks=get_callback(ckpoint_file_name, patience),
                              verbose=1,
                              shuffle=True
                              )
@@ -252,8 +247,8 @@ if __name__ == '__main__':
             val_loss = hist.history['val_loss'][0]
 
             nsml.report(summary=True, step=epoch, epoch_total=nb_epoch, loss=train_loss, acc=train_acc, val_loss=val_loss, val_acc=val_acc)
-            #nsml.save(epoch)
-            nsml.save(checkpoint=checkpoint)
+            nsml.save(epoch)
+            #nsml.save(checkpoint=checkpoint)
         print('Total training time : %.1f' % (time.time() - t0))
         # print(model.predict_classes(X))
 

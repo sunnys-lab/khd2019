@@ -7,7 +7,6 @@ import keras
 import cv2
 import numpy as np
 
-
 from keras.utils import np_utils
 from sklearn.model_selection import train_test_split
 from keras.models import Sequential
@@ -18,10 +17,6 @@ from keras.preprocessing.image import ImageDataGenerator
 from keras import optimizers
 from keras.callbacks import ModelCheckpoint, ReduceLROnPlateau
 from keras.utils.training_utils import multi_gpu_model
-from keras.optimizers import SGD
-from sklearn.model_selection import StratifiedKFold, KFold
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint, CSVLogger
-
 import keras.backend.tensorflow_backend as K
 import nsml
 from nsml.constants import DATASET_PATH, GPU_NUM
@@ -29,38 +24,9 @@ from nsml.constants import DATASET_PATH, GPU_NUM
 from model import cnn_sample
 from dataprocessing import image_preprocessing, dataset_loader
 
-from nasnet import NASNet
-
-
 ## setting values of preprocessing parameters
 RESIZE = 10.
 RESCALE = True
-
-def get_callback(ckpoint_model_name, patient):
-    ES = EarlyStopping(
-        monitor='val_loss',  # val_f1_m or val_loss
-        patience=patient,
-        mode='auto',
-        verbose=1)
-    RR = ReduceLROnPlateau(
-        monitor = 'val_loss', # val_f1_m or val_loss
-        factor = 0.1,
-        patience = patient / 3,
-        min_lr=1e-20,
-        verbose=1,
-        mode='auto')
-    MC = ModelCheckpoint(
-        filepath=ckpoint_model_name,
-        monitor='val_loss', # val_f1_m or val_loss
-        verbose=1,
-        save_best_only=True,
-        mode='auto')  # loss -> min or acc --> max
-    #LG = CSVLogger(
-    #    './logs/' + BASE_MODEL_STR + '_Native_' + datetime.now().strftime("%m%d%H%M%S") + '_log.csv',
-    #    append=True,
-    #    separator=',')
-
-    return [ES, RR, MC]
 
 
 def bind_model(model):
@@ -82,7 +48,7 @@ def bind_model(model):
             X.append(image_preprocessing(d, rescale, resize_factor))
         X = np.array(X)
 
-        pred = model.predict_classes(X)     # 모델 예측 결과: 0-3
+        pred = model.predict_classes(X)  # 모델 예측 결과: 0-3
         print('Prediction done!\n Saving the result...')
         return pred
 
@@ -93,9 +59,9 @@ if __name__ == '__main__':
     args = argparse.ArgumentParser()
 
     # hyperparameters
-    args.add_argument('--epoch', type=int, default=10)                          # epoch 수 설정
-    args.add_argument('--batch_size', type=int, default=8)                      # batch size 설정
-    args.add_argument('--num_classes', type=int, default=4)                     # DO NOT CHANGE num_classes, class 수는 항상 4
+    args.add_argument('--epoch', type=int, default=10)  # epoch 수 설정
+    args.add_argument('--batch_size', type=int, default=8)  # batch size 설정
+    args.add_argument('--num_classes', type=int, default=4)  # DO NOT CHANGE num_classes, class 수는 항상 4
 
     # DONOTCHANGE: They are reserved for nsml
     args.add_argument('--mode', type=str, default='train', help='submit일때 해당값이 test로 설정됩니다.')
@@ -113,60 +79,18 @@ if __name__ == '__main__':
     batch_size = config.batch_size
     num_classes = config.num_classes
 
-
-    # 상위 코드는 베이스라인 코드
-    # hyper parameter 변경
-    nb_epoch = 100
-    batch_size = 16
-    nb_classes = num_classes
-    #img_dim = input_shape
-    depth = 16
-    nb_dense_block = 5
-    growth_rate = 4
-    nb_filter = 16
-    dropout_rate = 0.5
-    weight_decay = 1e-5
-    l_rate = 1e-6
-    using_pre_model = False
-    checkpoint_str = '129'
-    session_str = 'Sunny/ir_ph1_v2/133'
-
-
     """ Model """
-    
-    learning_rate = l_rate
 
-    h, w = int(2400//RESIZE), int(3300//RESIZE)
-    input_shape = (h, w, 3)  # input image shape
-    #model = cnn_sample(in_shape=(h, w, 3), num_classes=num_classes)
-    # the parameters for NASNetLarge
-    model = NASNet(input_shape=input_shape,
-                   penultimate_filters=2016,
-                   nb_blocks=4,
-                   stem_filters=48,
-                   skip_reduction_layer_input=True,
-                   use_auxiliary_branch=False,
-                   filters_multiplier=2,
-                   dropout=dropout_rate,
-                   classes=nb_classes)
+    learning_rate = 1e-4
 
-    model.summary()
-
-    """ Initiate RMSprop optimizer """
-    opt = SGD(lr=l_rate, decay=weight_decay, momentum=0.9, nesterov=True)
-    # opt = Nadam(lr=0.002, beta_1=0.9, beta_2=0.999, epsilon=1e-08, schedule_decay=0.004)
-
-    # Pre-trained Model Loading
-    if using_pre_model:
-        nsml.load(checkpoint=checkpoint_str, session=session_str)
-
-
-    model.compile(loss='categorical_crossentropy',
-                  optimizer=opt,
-                  metrics=['acc'])
+    #h, w = int(3072 // RESIZE), int(3900 // RESIZE)
+    h, w = int(2400 // RESIZE), int(3300 // RESIZE)
+    model = cnn_sample(in_shape=(h, w, 3), num_classes=num_classes)
+    adam = optimizers.Adam(lr=learning_rate, decay=1e-5)  # optional optimization
+    sgd = optimizers.SGD(lr=learning_rate, momentum=0.9, nesterov=True)
+    model.compile(loss='categorical_crossentropy', optimizer=sgd, metrics=['categorical_accuracy'])
 
     bind_model(model)
-
     if config.pause:  ## test mode일 때
         print('Inferring Start...')
         nsml.paused(scope=locals())
@@ -194,26 +118,16 @@ if __name__ == '__main__':
             height_shift_range=0.05,
             horizontal_flip=True,
             vertical_flip=False,
-            fill_mode = 'nearest'
+            fill_mode='nearest'
         )
         train_datagen = ImageDataGenerator(**kwargs)
-        train_generator = train_datagen.flow(x=X, y=Y, shuffle=False, batch_size=batch_size, seed=seed)
+        train_generator = train_datagen.flow(x=X, y=Y, shuffle= False, batch_size=batch_size, seed=seed)
         # then flow and fit_generator....
 
 
         """ Callback """
-        monitor = 'val_loss'
+        monitor = 'categorical_accuracy'
         reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=3)
-
-        """ CheckPoint"""
-        checkpoint = ModelCheckpoint(
-            #filepath=ckpoint_model_name,
-            monitor='val_loss',  # val_f1_m or val_loss
-            verbose=1,
-            save_best_only=True,
-            mode='auto')  # loss -> min or acc --> max
-
-
 
         """ Training loop """
         STEP_SIZE_TRAIN = len(X) // batch_size
@@ -221,8 +135,8 @@ if __name__ == '__main__':
         t0 = time.time()
 
         ## data를 trainin과 validation dataset으로 나누기
-        train_val_ratio = 0.75
-        tmp = int(len(Y)*train_val_ratio)
+        train_val_ratio = 0.8
+        tmp = int(len(Y) * train_val_ratio)
         X_train = X[:tmp]
         Y_train = Y[:tmp]
         X_val = X[tmp:]
@@ -231,16 +145,15 @@ if __name__ == '__main__':
         for epoch in range(nb_epoch):
             t1 = time.time()
             print("### Model Fitting.. ###")
-            print('epoch = {} / {}'.format(epoch+1, nb_epoch))
+            print('epoch = {} / {}'.format(epoch + 1, nb_epoch))
             print('check point = {}'.format(epoch))
 
             # for no augmentation case
             hist = model.fit(X_train, Y_train,
                              validation_data=(X_val, Y_val),
                              batch_size=batch_size,
-                             #initial_epoch=epoch,
+                             # initial_epoch=epoch,
                              callbacks=[reduce_lr],
-                             verbose=1,
                              shuffle=True
                              )
             t2 = time.time()
@@ -251,11 +164,8 @@ if __name__ == '__main__':
             val_acc = hist.history['val_categorical_accuracy'][0]
             val_loss = hist.history['val_loss'][0]
 
-            nsml.report(summary=True, step=epoch, epoch_total=nb_epoch, loss=train_loss, acc=train_acc, val_loss=val_loss, val_acc=val_acc)
-            #nsml.save(epoch)
-            nsml.save(checkpoint=checkpoint)
+            nsml.report(summary=True, step=epoch, epoch_total=nb_epoch, loss=train_loss, acc=train_acc,
+                        val_loss=val_loss, val_acc=val_acc)
+            nsml.save(epoch)
         print('Total training time : %.1f' % (time.time() - t0))
         # print(model.predict_classes(X))
-
-
-

@@ -40,21 +40,21 @@ def get_callback(ckpoint_model_name, patient):
     ES = EarlyStopping(
         monitor='val_loss',  # val_f1_m or val_loss
         patience=patient,
-        mode='auto',
+        mode='min',
         verbose=1)
     RR = ReduceLROnPlateau(
-        monitor = 'val_loss', # val_f1_m or val_loss
-        factor = 0.1,
-        patience = patient / 3,
+        monitor='val_loss', # val_f1_m or val_loss
+        factor=0.1,
+        patience=patient / 3,
         min_lr=1e-20,
         verbose=1,
-        mode='auto')
+        mode='min')
     MC = ModelCheckpoint(
         filepath=ckpoint_model_name,
         monitor='val_loss', # val_f1_m or val_loss
         verbose=1,
         save_best_only=True,
-        mode='auto')  # loss -> min or acc --> max
+        mode='min')  # loss -> min or acc --> max
     #LG = CSVLogger(
     #    './logs/' + BASE_MODEL_STR + '_Native_' + datetime.now().strftime("%m%d%H%M%S") + '_log.csv',
     #    append=True,
@@ -116,6 +116,8 @@ if __name__ == '__main__':
 
     # 상위 코드는 베이스라인 코드
     # hyper parameter 변경
+    k_folds = 5
+    patience = 9
     nb_epoch = 100
     batch_size = 16
     nb_classes = num_classes
@@ -184,78 +186,95 @@ if __name__ == '__main__':
         X = np.array([n[0] for n in dataset])
         Y = np.array([n[1] for n in dataset])
 
+        # 층화 모델 설정
+        skf = StratifiedKFold(n_splits=k_folds, random_state=seed)
 
-        ## Augmentation 예시
-        kwargs = dict(
-            rotation_range=5,
-            zoom_range=0.05,
-            shear_range=0.1,
-            width_shift_range=0.05,
-            height_shift_range=0.05,
-            horizontal_flip=True,
-            vertical_flip=False,
-            fill_mode = 'nearest'
-        )
-        train_datagen = ImageDataGenerator(**kwargs)
-        train_generator = train_datagen.flow(x=X, y=Y, shuffle=False, batch_size=batch_size, seed=seed)
-        # then flow and fit_generator....
+        j = 1
+        ckpoint_file_names = []
+
+        for (train_index, valid_index) in skf.split(X, Y):
+            #traindf = df_train.iloc[train_index, :].reset_index()
+            #validdf = df_train.iloc[valid_index, :].reset_index()
+            print("TRAIN:", train_index, "VALID:", valid_index)
+            X_train, X_val = X[train_index], X[valid_index]
+            Y_train, Y_val = Y[train_index], Y[valid_index]
+
+            print("==============================================")
+            print("====== K Fold Validation step => %d/%d =======" % (j, k_folds))
+            print("==============================================")
+
+            ## Augmentation 예시
+            kwargs = dict(
+                rotation_range=5,
+                zoom_range=0.05,
+                shear_range=0.05,
+                width_shift_range=0.05,
+                height_shift_range=0.05,
+                horizontal_flip=False,
+                vertical_flip=False,
+                fill_mode='nearest'
+            )
+            train_datagen = ImageDataGenerator(**kwargs)
+            train_generator = train_datagen.flow(x=X, y=Y, shuffle=False, batch_size=batch_size, seed=seed)
+            # then flow and fit_generator....
+
+            """ Callback """
+            monitor = 'val_loss'
+            reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=3)
+
+            """ Training loop """
+            STEP_SIZE_TRAIN = len(X) // batch_size
+            print('\n\nSTEP_SIZE_TRAIN = {}\n\n'.format(STEP_SIZE_TRAIN))
+            t0 = time.time()
+
+            ## data를 trainin과 validation dataset으로 나누기
+            #train_val_ratio = 0.75
+            #tmp = int(len(Y) * train_val_ratio)
+            #X_train = X[:tmp]
+            #Y_train = Y[:tmp]
+            #X_val = X[tmp:]
+            #Y_val = Y[tmp:]
+
+            ckpoint_file_name = str(j) + '_epoch_{epoch}' + '_acc_{val_acc:.4f}_loss_{val_loss:.4f}_' + '.hdf5'
+            ckpoint_file_names.append(ckpoint_file_name)
+
+            try:
+                model.load_weights(ckpoint_file_name)
+            except:
+                pass
+
+            for epoch in range(nb_epoch):
+                t1 = time.time()
+                print("### Model Fitting.. ###")
+                print('epoch = {} / {}'.format(epoch + 1, nb_epoch))
+                print('check point = {}'.format(epoch))
+
+                # for no augmentation case
+                hist = model.fit(X_train, Y_train,
+                                 validation_data=(X_val, Y_val),
+                                 batch_size=batch_size,
+                                 # initial_epoch=epoch,
+                                 # callbacks=[reduce_lr],
+                                 callbacks=get_callback(ckpoint_file_name, patience),
+                                 verbose=2,
+                                 shuffle=True
+                                 )
+                t2 = time.time()
+                print(hist.history)
+                print('Training time for one epoch : %.1f' % ((t2 - t1)))
+                train_acc = hist.history['categorical_accuracy'][0]
+                train_loss = hist.history['loss'][0]
+                val_acc = hist.history['val_categorical_accuracy'][0]
+                val_loss = hist.history['val_loss'][0]
+
+                nsml.report(summary=True, step=epoch, epoch_total=nb_epoch, loss=train_loss, acc=train_acc,
+                            val_loss=val_loss, val_acc=val_acc)
+                nsml.save(epoch)
+            print('Total training time : %.1f' % (time.time() - t0))
+            # print(model.predict_classes(X))
 
 
-        """ Callback """
-        monitor = 'val_loss'
-        reduce_lr = ReduceLROnPlateau(monitor=monitor, patience=3)
 
-        """ CheckPoint"""
-        checkpoint = ModelCheckpoint(
-            #filepath=ckpoint_model_name,
-            monitor='val_loss',  # val_f1_m or val_loss
-            verbose=1,
-            save_best_only=True,
-            mode='auto')  # loss -> min or acc --> max
-
-
-
-        """ Training loop """
-        STEP_SIZE_TRAIN = len(X) // batch_size
-        print('\n\nSTEP_SIZE_TRAIN = {}\n\n'.format(STEP_SIZE_TRAIN))
-        t0 = time.time()
-
-        ## data를 trainin과 validation dataset으로 나누기
-        train_val_ratio = 0.75
-        tmp = int(len(Y)*train_val_ratio)
-        X_train = X[:tmp]
-        Y_train = Y[:tmp]
-        X_val = X[tmp:]
-        Y_val = Y[tmp:]
-
-        for epoch in range(nb_epoch):
-            t1 = time.time()
-            print("### Model Fitting.. ###")
-            print('epoch = {} / {}'.format(epoch+1, nb_epoch))
-            print('check point = {}'.format(epoch))
-
-            # for no augmentation case
-            hist = model.fit(X_train, Y_train,
-                             validation_data=(X_val, Y_val),
-                             batch_size=batch_size,
-                             #initial_epoch=epoch,
-                             callbacks=[reduce_lr],
-                             verbose=1,
-                             shuffle=True
-                             )
-            t2 = time.time()
-            print(hist.history)
-            print('Training time for one epoch : %.1f' % ((t2 - t1)))
-            train_acc = hist.history['categorical_accuracy'][0]
-            train_loss = hist.history['loss'][0]
-            val_acc = hist.history['val_categorical_accuracy'][0]
-            val_loss = hist.history['val_loss'][0]
-
-            nsml.report(summary=True, step=epoch, epoch_total=nb_epoch, loss=train_loss, acc=train_acc, val_loss=val_loss, val_acc=val_acc)
-            #nsml.save(epoch)
-            nsml.save(checkpoint=checkpoint)
-        print('Total training time : %.1f' % (time.time() - t0))
-        # print(model.predict_classes(X))
 
 
 

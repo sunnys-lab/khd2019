@@ -7,29 +7,15 @@ import keras
 import cv2
 import numpy as np
 
-def equalize_hist(img):
-    for c in range(0, 2):
-       img[:,:,c] = cv2.equalizeHist(img[:,:,c])
-
-    #cv2.imshow('Histogram equalized', img)
-    #cv2.waitKey(0)
-
-    return img
 
 
 def image_preprocessing(im, rescale, resize_factor):
-    #이미지 자르기
-    image_crop = im[300:2700, 300:3600]
-
-
     ## 이미지 크기 조정 및 픽셀 범위 재설정
-    #h, w, c = 3072, 3900, 3
-    h, w, c = 2400, 3300, 3
+    h, w, c = 3072, 3900, 3
     nh, nw = int(h//resize_factor), int(w//resize_factor)
     # print(im.shape)
 
     res = cv2.resize(im, (nw, nh), interpolation=cv2.INTER_AREA)
-    res_n = equalize_hist(res)
 
     if rescale == True:
         res = res / 255.
